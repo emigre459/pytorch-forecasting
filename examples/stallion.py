@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from pandas.core.common import SettingWithCopyWarning
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping, LearningRateLogger
+from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import TensorBoardLogger
 import torch
 
@@ -54,7 +54,7 @@ training = TimeSeriesDataSet(
     time_idx="time_idx",
     target="volume",
     group_ids=["agency", "sku"],
-    min_encoder_length=0,  # allow encoder lengths from 0 to max_prediction_length
+    min_encoder_length=max_encoder_length // 2,  # allow encoder lengths from 0 to max_prediction_length
     max_encoder_length=max_encoder_length,
     min_prediction_length=1,
     max_prediction_length=max_prediction_length,
@@ -87,26 +87,26 @@ batch_size = 64
 train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
 val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, num_workers=0)
 
+
 # save datasets
-training.save("training.pkl")
+training.save("t raining.pkl")
 validation.save("validation.pkl")
 
 early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=10, verbose=False, mode="min")
-lr_logger = LearningRateLogger()
+lr_logger = LearningRateMonitor()
 
 trainer = pl.Trainer(
     max_epochs=100,
     gpus=0,
     weights_summary="top",
     gradient_clip_val=0.1,
-    early_stop_callback=early_stop_callback,
     limit_train_batches=30,
     # val_check_interval=20,
     # limit_val_batches=1,
     # fast_dev_run=True,
     # logger=logger,
     # profiler=True,
-    callbacks=[lr_logger],
+    callbacks=[lr_logger, early_stop_callback],
 )
 
 
@@ -131,39 +131,43 @@ print(f"Number of parameters in network: {tft.size()/1e3:.1f}k")
 # tft.hparams.log_val_interval = -1
 # trainer.limit_train_batches = 1.0
 # # run learning rate finder
-# res = trainer.lr_find(tft, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, min_lr=1e-5, max_lr=1e2)
+# res = trainer.tuner.lr_find(
+#     tft, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, min_lr=1e-5, max_lr=1e2
+# )
 # print(f"suggested learning rate: {res.suggestion()}")
 # fig = res.plot(show=True, suggest=True)
 # fig.show()
 # tft.hparams.learning_rate = res.suggestion()
 
-trainer.fit(
-    tft,
-    train_dataloader=train_dataloader,
-    val_dataloaders=val_dataloader,
-)
+# trainer.fit(
+#     tft,
+#     train_dataloader=train_dataloader,
+#     val_dataloaders=val_dataloader,
+# )
 
 # # make a prediction on entire validation set
 # preds, index = tft.predict(val_dataloader, return_index=True, fast_dev_run=True)
 
 
-# # tune
-# study = optimize_hyperparameters(
-#     train_dataloader,
-#     val_dataloader,
-#     model_path="optuna_test",
-#     n_trials=15,
-#     max_epochs=25,
-#     gradient_clip_val_range=(0.01, 1.0),
-#     hidden_size_range=(8, 128),
-#     hidden_continuous_size_range=(8, 128),
-#     attention_head_size_range=(1, 4),
-#     dropout_range=(0.1, 0.3),
-#     trainer_kwargs=dict(val_check_interval=20),
-#     # reduce_on_plateau_patience=2,
-# )
-# with open("test_study.pickle", "wb") as fout:
-#     pickle.dump(study, fout)
+# tune
+study = optimize_hyperparameters(
+    train_dataloader,
+    val_dataloader,
+    model_path="optuna_test",
+    n_trials=200,
+    max_epochs=50,
+    gradient_clip_val_range=(0.01, 1.0),
+    hidden_size_range=(8, 128),
+    hidden_continuous_size_range=(8, 128),
+    attention_head_size_range=(1, 4),
+    learning_rate_range=(0.001, 0.1),
+    dropout_range=(0.1, 0.3),
+    trainer_kwargs=dict(limit_train_batches=30),
+    reduce_on_plateau_patience=4,
+    use_learning_rate_finder=False,
+)
+with open("test_study.pkl", "wb") as fout:
+    pickle.dump(study, fout)
 
 
 # profile speed

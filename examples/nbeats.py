@@ -55,7 +55,7 @@ trainer = pl.Trainer(
     gpus=0,
     weights_summary="top",
     gradient_clip_val=0.1,
-    early_stop_callback=early_stop_callback,
+    callbacks=[early_stop_callback],
     limit_train_batches=15,
     # limit_val_batches=1,
     # fast_dev_run=True,
@@ -75,7 +75,9 @@ print(f"Number of parameters in network: {net.size()/1e3:.1f}k")
 # net.hparams.log_val_interval = -1
 # trainer.limit_train_batches = 1.0
 # # run learning rate finder
-# res = trainer.lr_find(net, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, min_lr=1e-5, max_lr=1e2)
+# res = trainer.tuner.lr_find(
+#     net, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, min_lr=1e-5, max_lr=1e2
+# )
 # print(f"suggested learning rate: {res.suggestion()}")
 # fig = res.plot(show=True, suggest=True)
 # fig.show()

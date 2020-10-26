@@ -33,9 +33,13 @@ Alternatively, you can install the package via conda
 
 `conda install pytorch-forecasting -c conda-forge`
 
-If you do not have pytorch installed, install it is recommended to install it first from the pytorch channel
+If you do not have pytorch installed, install it is recommended to install it first from the pytorch channel.
 
 `conda install pytorch -c pytorch`
+
+If you have installed a version below PyTorch 1.6, update it:
+
+`conda update pytorch -c pytorch`
 
 # Documentation
 
@@ -54,7 +58,7 @@ documentation with detailed tutorials.
 
 ```python
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping
+from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
 
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 
@@ -89,14 +93,13 @@ val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size, nu
 
 
 early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=1, verbose=False, mode="min")
-lr_logger = LearningRateLogger()
+lr_logger = LearningRateMonitor()
 trainer = pl.Trainer(
     max_epochs=100,
     gpus=0,
     gradient_clip_val=0.1,
-    early_stop_callback=early_stop_callback,
     limit_train_batches=30,
-    callbacks=[lr_logger],
+    callbacks=[lr_logger, early_stop_callback],
 )
 
 

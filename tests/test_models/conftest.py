@@ -79,23 +79,26 @@ def data_with_covariates():
         dict(target_normalizer=EncoderNormalizer(), min_encoder_length=2),
         dict(target_normalizer=GroupNormalizer(log_scale=True)),
         dict(target_normalizer=GroupNormalizer(groups=["agency", "sku"], coerce_positive=1.0)),
+        dict(target="agency"),
     ]
 )
-def multiple_dataloaders_with_coveratiates(data_with_covariates, request):
+def multiple_dataloaders_with_covariates(data_with_covariates, request):
     training_cutoff = "2016-09-01"
     max_encoder_length = 36
     max_prediction_length = 6
 
+    params = request.param
+    params.setdefault("target", "volume")
+
     training = TimeSeriesDataSet(
         data_with_covariates[lambda x: x.date < training_cutoff],
         time_idx="time_idx",
-        target="volume",
         # weight="weight",
         group_ids=["agency", "sku"],
         max_encoder_length=max_encoder_length,
         max_prediction_length=max_prediction_length,
         add_relative_time_idx=True,
-        **request.param  # fixture parametrization
+        **params  # fixture parametrization
     )
 
     validation = TimeSeriesDataSet.from_dataset(
@@ -109,7 +112,7 @@ def multiple_dataloaders_with_coveratiates(data_with_covariates, request):
 
 
 @pytest.fixture
-def dataloaders_with_coveratiates(data_with_covariates):
+def dataloaders_with_covariates(data_with_covariates):
     training_cutoff = "2016-09-01"
     max_encoder_length = 36
     max_prediction_length = 6
@@ -139,7 +142,7 @@ def dataloaders_with_coveratiates(data_with_covariates):
 
 
 @pytest.fixture()
-def dataloaders_fixed_window_without_coveratiates():
+def dataloaders_fixed_window_without_covariates():
     data = generate_ar_data(seasonality=10.0, timesteps=400, n_series=10)
     validation = data.series.iloc[:2]
 

@@ -5,7 +5,6 @@ from typing import Callable, Dict, List, Tuple, Union
 
 from matplotlib import pyplot as plt
 import numpy as np
-from pytorch_lightning.metrics.metric import TensorMetric
 import torch
 from torch import nn
 from torch.nn.utils import rnn
@@ -13,16 +12,16 @@ from torch.nn.utils import rnn
 from pytorch_forecasting.data import TimeSeriesDataSet
 from pytorch_forecasting.metrics import MAE, MAPE, MASE, RMSE, SMAPE, MultiHorizonMetric, QuantileLoss
 from pytorch_forecasting.models.base_model import BaseModel, CovariatesMixin
+from pytorch_forecasting.models.nn import MultiEmbedding
 from pytorch_forecasting.models.temporal_fusion_transformer.sub_modules import (
     AddNorm,
     GateAddNorm,
     GatedLinearUnit,
     GatedResidualNetwork,
     InterpretableMultiHeadAttention,
-    TimeDistributedEmbeddingBag,
     VariableSelectionNetwork,
 )
-from pytorch_forecasting.utils import autocorrelation, get_embedding_size, integer_histogram
+from pytorch_forecasting.utils import autocorrelation, get_embedding_size, integer_histogram, padded_stack
 
 
 class TemporalFusionTransformer(BaseModel, CovariatesMixin):
@@ -32,7 +31,7 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         lstm_layers: int = 1,
         dropout: float = 0.1,
         output_size: int = 7,
-        loss: MultiHorizonMetric = QuantileLoss(),
+        loss: MultiHorizonMetric = None,
         attention_head_size: int = 4,
         max_encoder_length: int = 10,
         static_categoricals: List[str] = [],
@@ -56,7 +55,7 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         reduce_on_plateau_patience: int = 1000,
         monotone_constaints: Dict[str, int] = {},
         share_single_variable_networks: bool = False,
-        logging_metrics: nn.ModuleList = nn.ModuleList([SMAPE(), MAE(), RMSE(), MAPE()]),
+        logging_metrics: nn.ModuleList = None,
         **kwargs,
     ):
         """
@@ -128,6 +127,10 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
                 Defaults to nn.ModuleList([SMAPE(), MAE(), RMSE(), MAPE()]).
             **kwargs: additional arguments to :py:class:`~BaseModel`.
         """
+        if logging_metrics is None:
+            logging_metrics = nn.ModuleList([SMAPE(), MAE(), RMSE(), MAPE()])
+        if loss is None:
+            loss = QuantileLoss()
         self.save_hyperparameters()
         # store loss function separately as it is a module
         assert isinstance(loss, MultiHorizonMetric), "Loss must be of class `MultiHorizonMetric`"
@@ -135,26 +138,13 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
 
         # processing inputs
         # embeddings
-        self.input_embeddings = nn.ModuleDict()
-        for name in self.hparams.embedding_sizes.keys():
-            embedding_size = min(self.hparams.embedding_sizes[name][1], self.hparams.hidden_size)
-            # convert to list to become mutable
-            self.hparams.embedding_sizes[name] = list(self.hparams.embedding_sizes[name])
-            self.hparams.embedding_sizes[name][1] = embedding_size
-            if name in self.hparams.categorical_groups:  # embedding bag if related embeddings
-                self.input_embeddings[name] = TimeDistributedEmbeddingBag(
-                    self.hparams.embedding_sizes[name][0], embedding_size, mode="sum", batch_first=True
-                )
-            else:
-                if name in self.hparams.embedding_paddings:
-                    padding_idx = 0
-                else:
-                    padding_idx = None
-                self.input_embeddings[name] = nn.Embedding(
-                    self.hparams.embedding_sizes[name][0],
-                    embedding_size,
-                    padding_idx=padding_idx,
-                )
+        self.input_embeddings = MultiEmbedding(
+            embedding_sizes=self.hparams.embedding_sizes,
+            categorical_groups=self.hparams.categorical_groups,
+            embedding_paddings=self.hparams.embedding_paddings,
+            x_categoricals=self.hparams.x_categoricals,
+            max_embedding_size=self.hparams.hidden_size,
+        )
 
         # continuous variable processing
         self.prescalers = nn.ModuleDict(
@@ -448,20 +438,7 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         x_cont = torch.cat([x["encoder_cont"], x["decoder_cont"]], dim=1)  # concatenate in time dimension
         timesteps = x_cont.size(1)  # encode + decode length
         max_encoder_length = int(encoder_lengths.max())
-        input_vectors = {}
-        for name, emb in self.input_embeddings.items():
-            if name in self.hparams.categorical_groups:
-                input_vectors[name] = emb(
-                    x_cat[
-                        ...,
-                        [
-                            self.hparams.x_categoricals.index(cat_name)
-                            for cat_name in self.hparams.categorical_groups[name]
-                        ],
-                    ]
-                )
-            else:
-                input_vectors[name] = emb(x_cat[..., self.hparams.x_categoricals.index(name)])
+        input_vectors = self.input_embeddings(x_cat)
         input_vectors.update({name: x_cont[..., idx].unsqueeze(-1) for idx, name in enumerate(self.hparams.x_reals)})
 
         # Embedding and variable selection
@@ -610,10 +587,8 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         """
         run at epoch end for training or validation
         """
-        log, out = super().epoch_end(outputs, label=label)
         if self.log_interval(label == "train") > 0:
-            self._log_interpretation(out, label=label)
-        return log, out
+            self._log_interpretation(outputs, label=label)
 
     def interpret_output(
         self,
@@ -820,7 +795,8 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         """
         # extract interpretations
         interpretation = {
-            name: torch.stack([x["interpretation"][name] for x in outputs]).sum(0)
+            # use padded_stack because decoder length histogram can be of different length
+            name: padded_stack([x["interpretation"][name] for x in outputs], side="right", value=0).sum(0)
             for name in outputs[0]["interpretation"].keys()
         }
         # normalize attention with length histogram squared to account for: 1. zeros in attention and
@@ -851,7 +827,7 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         # log lengths of encoder/decoder
         for type in ["encoder", "decoder"]:
             fig, ax = plt.subplots()
-            lengths = torch.stack([out["interpretation"][f"{type}_length_histogram"] for out in outputs]).sum(0).cpu()
+            lengths = padded_stack([out["interpretation"][f"{type}_length_histogram"] for out in outputs]).sum(0).cpu()
             if type == "decoder":
                 start = 1
             else:

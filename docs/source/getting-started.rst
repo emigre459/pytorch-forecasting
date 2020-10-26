@@ -22,9 +22,13 @@ Alternatively, to installl the package via conda:
 
 ``conda install pytorch-forecasting -c conda-forge``
 
-If you do not have pytorch installed, install it is recommended to install it first from the pytorch channel
+If you do not have pytorch installed, install it is recommended to install it first from the pytorch channel:
 
 ``conda install pytorch -c pytorch``
+
+If you have installed a version below PyTorch 1.6, update it:
+
+``conda update pytorch -c pytorch``
 
 
 Usage
@@ -46,7 +50,7 @@ The general setup for training and testing a model is
 
 #. Instantiate a model using the its ``.from_dataset()`` method.
 #. Create a ``pytorch_lightning.Trainer()`` object.
-#. Find the optimal learning rate with its ``.lr_find()`` method.
+#. Find the optimal learning rate with its ``.tuner.lr_find()`` method.
 #. Train the model with early stopping on the training dataset and use the tensorboard logs
    to understand if it has converged with acceptable accuracy.
 #. Tune the hyperparameters of the model with your
@@ -62,7 +66,7 @@ Example
 .. code-block:: python
 
     import pytorch_lightning as pl
-    from pytorch_lightning.callbacks import EarlyStopping
+    from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor
 
     from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 
@@ -98,14 +102,13 @@ Example
 
     # define trainer with early stopping
     early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=1, verbose=False, mode="min")
-    lr_logger = LearningRateLogger()
+    lr_logger = LearningRateMonitor()
     trainer = pl.Trainer(
         max_epochs=100,
         gpus=0,
         gradient_clip_val=0.1,
-        early_stop_callback=early_stop_callback,
         limit_train_batches=30,
-        callbacks=[lr_logger],
+        callbacks=[lr_logger, early_stop_callback],
     )
 
     # create the model
@@ -124,7 +127,7 @@ Example
     print(f"Number of parameters in network: {tft.size()/1e3:.1f}k")
 
     # find optimal learning rate (set limit_train_batches to 1.0 and log_interval = -1)
-    res = trainer.lr_find(
+    res = trainer.tuner.lr_find(
         tft, train_dataloader=train_dataloader, val_dataloaders=val_dataloader, early_stop_threshold=1000.0, max_lr=0.3,
     )
 
