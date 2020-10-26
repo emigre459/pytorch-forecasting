@@ -130,7 +130,7 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
         """
         self.save_hyperparameters()
         # store loss function separately as it is a module
-        assert isinstance(loss, MultiHorizonMetric), "Loss has to of class `MultiHorizonMetric`"
+        assert isinstance(loss, MultiHorizonMetric), "Loss must be of class `MultiHorizonMetric`"
         super().__init__(loss=loss, logging_metrics=logging_metrics, **kwargs)
 
         # processing inputs
@@ -202,7 +202,7 @@ class TemporalFusionTransformer(BaseModel, CovariatesMixin):
             }
         )
 
-        # create single variable grns that are shared across decoder and encoder
+        # create single-variable GRNs that are shared across decoder and encoder
         if self.hparams.share_single_variable_networks:
             self.shared_single_variable_grns = nn.ModuleDict()
             for name, input_size in encoder_input_sizes.items():

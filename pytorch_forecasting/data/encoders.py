@@ -365,7 +365,7 @@ class GroupNormalizer(TorchNormalizer):
                 * True, i.e. output is clamped at 0.
                 * False, i.e. values are not coerced
                 * float, i.e. softmax is applied with beta = coerce_positive.
-            eps (float, optional): Number for numerical stability of calcualtions. Defaults to 1e-8.
+            eps (float, optional): Number for numerical stability of calculations. Defaults to 1e-8.
         """
         self.groups = groups
         self.scale_by_group = scale_by_group
