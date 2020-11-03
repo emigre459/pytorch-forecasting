@@ -612,7 +612,9 @@ class TimeSeriesDataSet(Dataset):
             Dict[str, Any]: dictionary of parameters
         """
         kwargs = {
-            name: getattr(self, name) for name in inspect.signature(self.__class__).parameters.keys() if name != "data"
+            name: getattr(self, name) 
+            for name in inspect.signature(self.__class__).parameters.keys() 
+            if name not in ["data", "self"]
         }
         kwargs["categorical_encoders"] = self.categorical_encoders
         kwargs["scalers"] = self.scalers
@@ -911,11 +913,11 @@ class TimeSeriesDataSet(Dataset):
             sequence_length >= self.min_prediction_length
         ), "Sequence length should be at least minimum prediction length"
         # determine prediction/decode length and encode length
-        decoder_length = min(
+        decoder_length = int(min(
             time[-1] - (self.min_prediction_idx - 1),
             self.max_prediction_length,
             sequence_length - self.min_encoder_length,
-        )
+        ))
         encoder_length = sequence_length - decoder_length
         assert (
             decoder_length >= self.min_prediction_length
